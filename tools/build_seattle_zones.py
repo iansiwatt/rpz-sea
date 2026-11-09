@@ -439,6 +439,36 @@ def resolve_data_version(features, baseline_path):
     if content_fingerprint(canonical_sort(base.get("features", []))) == \
             content_fingerprint(canonical_sort(features)):
         return str(previous)
+
+    # The data genuinely changed. Usually that means today's date — but not
+    # when the baseline was ALSO published today, which happened for real on
+    # 2026-11-09: two builds hours apart, 2,858 features then 2,857, both
+    # stamped the same date. The app refuses anything not strictly newer, so
+    # the second build could never reach a phone holding the first.
+    #
+    # So a same-day change gets a sequence suffix. Plain string comparison
+    # still orders these correctly, which is what both the app and the
+    # manifest rely on:
+    #
+    #     2026-11-09  <  2026-11-09.1  <  2026-11-09.2  <  2026-11-10
+    #
+    # including across the day boundary, because "1" > "0" at the character
+    # where the dates first differ.
+    previous = str(previous)
+    if previous == today or previous.startswith(today + "."):
+        suffix = previous[len(today) + 1:]
+        try:
+            n = int(suffix) if suffix else 0
+        except ValueError:
+            # An unrecognised suffix is not something to guess at. Restarting
+            # the sequence could emit a version that sorts BELOW the baseline,
+            # which would strand every installed app.
+            raise SystemExit(
+                f"baseline data_version {previous!r} is not a date or a "
+                f"date.sequence this script knows how to advance. Fix it by "
+                f"hand rather than letting the build invent a version that "
+                f"might sort below it.")
+        return f"{today}.{n + 1}"
     return today
 
 

@@ -197,6 +197,27 @@ check("dropped feature -> today",
 check("reordered input still carries forward",
       [] if bsz.resolve_data_version(bsz.canonical_sort(list(reversed(_f))), _stamped)
           == "2026-03-01" else ["wrong"], None)
+# The same-day sequence. This is the case that actually occurred on
+# 2026-11-09 and that the app could not see past.
+_sameday = _write("sameday.geojson", _today, _f)
+_changed2 = json.loads(json.dumps(_f))
+_changed2[0]["properties"]["zone"] = "4242"
+check("changed content, baseline stamped TODAY -> .1 suffix",
+      [] if bsz.resolve_data_version(_changed2, _sameday) == _today + ".1" else ["wrong"], None)
+_seq1 = _write("seq1.geojson", _today + ".1", _f)
+check("changed content again the same day -> .2",
+      [] if bsz.resolve_data_version(_changed2, _seq1) == _today + ".2" else ["wrong"], None)
+check("UNchanged content on a suffixed baseline still carries forward",
+      [] if bsz.resolve_data_version(_f, _seq1) == _today + ".1" else ["wrong"], None)
+_oldday = _write("oldday.geojson", "2026-03-01", _f)
+check("changed content on an older baseline -> plain today, no suffix",
+      [] if bsz.resolve_data_version(_changed2, _oldday) == _today else ["wrong"], None)
+
+# String ordering is what both the app and the manifest rely on.
+_order = ["2026-11-09", "2026-11-09.1", "2026-11-09.2", "2026-11-09.9", "2026-11-10"]
+check("versions sort correctly as plain strings",
+      [] if _order == sorted(_order) else ["out of order"], None)
+
 check("fingerprint ignores the envelope",
       [] if bsz.content_fingerprint(bsz.canonical_sort(_f)) == bsz.content_fingerprint(
           bsz.canonical_sort(json.load(open(_stamped))["features"])) else ["wrong"], None)
