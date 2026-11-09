@@ -1,0 +1,188 @@
+name: Rebuild zone data
+
+# Regenerates seattle_rpz_zones.geojson from SDOT's live feature service and
+# commits it, together with manifest.json, ONLY when the result differs from
+# what is already committed. Nothing is published when the city has changed
+# nothing, and nothing is committed when any validation gate fails.
+#
+# This repo is PUBLIC and data-only. The Swift app lives in the private
+# rpz-sea-app. That split is not tidiness: a private repo's raw URLs and
+# release assets both require an authenticated token, so an app polling a
+# private repo would have to ship a credential. Chicago has the same split
+# for the same reason (rpz-chi public, rpz-chi-app private).
+#
+# DIFFERENT FROM CHICAGO: no GitHub Release and no release tag. Chicago's
+# 8.6 MB file is published as a Release asset because adding that to git
+# history on every rebuild is a real cost. Seattle's is 1.6 MB, so the
+# committed file IS the published artefact and the app fetches it from
+# raw.githubusercontent.com. See tools/make_manifest.py for the one
+# consequence (a mutable raw URL, and why the race it allows is benign).
+#
+# CADENCE. Monthly, deliberately, even though RPZ boundaries change far less
+# often: GitHub disables scheduled workflows in a repository with no activity
+# for 60 days, so anything less frequent than monthly switches itself off
+# during its own first gap. Running monthly and committing only on a real
+# change keeps the schedule alive without publishing noise. The minute is not
+# :00 because scheduled jobs queue heavily on the hour.
+
+on:
+  schedule:
+    - cron: "23 8 11 * *"   # 08:23 UTC on the 11th of each month
+  workflow_dispatch:         # and on demand — use this for the first run
+
+permissions:
+  contents: write            # needed to commit the regenerated data
+
+concurrency:
+  group: rebuild-data
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v5
+
+      # No pip install step: both scripts are standard-library only.
+      - name: Show Python version
+        run: python3 --version
+
+      # Run the validator's own tests BEFORE trusting it to gate a build. A
+      # validator that has silently stopped firing would wave through exactly
+      # the bad data it exists to catch, and nobody would find out until the
+      # app was wrong. These are synthetic and need no network.
+      - name: Test the validation gates
+        run: python3 -I tools/test_build_seattle_zones.py
+
+      - name: Record the baseline
+        id: baseline
+        run: |
+          set -euo pipefail
+          BASE="seattle_rpz_zones.geojson"
+          if [ -f "$BASE" ]; then
+            OLD=$(python3 -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$BASE")
+            echo "old sha256: $OLD"
+            echo "sha=$OLD" >> "$GITHUB_OUTPUT"
+            cp "$BASE" baseline.geojson
+          else
+            echo "No committed GeoJSON yet — first run, no baseline."
+            echo "sha=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # build_seattle_zones.py fetches from SDOT, builds, validates, and exits
+      # non-zero WITHOUT writing anything if a gate trips. This step failing
+      # is the fail-closed behaviour working, not a broken workflow — read the
+      # failure list it prints before changing any threshold, and read the
+      # ground-truth warning in the script before editing an expectation.
+      #
+      # NOTE: this is the only place the pipeline can actually run. Neither
+      # the authoring sandbox nor the user's Mac can reach services.arcgis.com
+      # (proxy 403 on CONNECT), so a run here is the only real execution.
+      - name: Fetch, build and validate
+        run: |
+          set -euo pipefail
+          mkdir -p raw out
+          BASELINE_ARG=""
+          if [ -f baseline.geojson ]; then
+            BASELINE_ARG="--baseline baseline.geojson"
+          fi
+          python3 -I tools/build_seattle_zones.py raw out/seattle_rpz_zones.geojson \
+            --refresh \
+            --report-json out/report.json \
+            $BASELINE_ARG \
+            2>&1 | tee out/report.txt
+          echo "--- raw downloads ---"
+          ls -l raw/
+
+      - name: Write the manifest
+        run: |
+          set -euo pipefail
+          python3 -I tools/make_manifest.py \
+            --data out/seattle_rpz_zones.geojson \
+            --out out/manifest.json \
+            --repo "${{ github.repository }}" \
+            --branch "${{ github.ref_name }}" \
+            --report out/report.json
+          cat out/manifest.json
+
+      # Keep the diagnostics whether or not anything is committed; the metrics
+      # are the only record of a run that correctly decided to do nothing.
+      - name: Upload the build report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-report
+          path: out/
+          retention-days: 90
+
+      - name: Decide whether anything changed
+        id: changed
+        run: |
+          set -euo pipefail
+          NEW=$(python3 -c "import hashlib;print(hashlib.sha256(open('out/seattle_rpz_zones.geojson','rb').read()).hexdigest())")
+          echo "new sha256: $NEW"
+          OLD="${{ steps.baseline.outputs.sha }}"
+          if [ "$NEW" = "$OLD" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Byte-identical to the committed data. SDOT changed nothing that affects us."
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+          # Distinguish a real data change from a pure reordering, so the
+          # first run after canonical_sort lands does not look like a city
+          # change. Also covers the first run of all, which has no baseline.
+          KIND=data
+          if [ -f baseline.geojson ]; then
+            KIND=$(python3 - <<'PY'
+          import json, importlib.util
+          spec = importlib.util.spec_from_file_location("bsz", "tools/build_seattle_zones.py")
+          bsz = importlib.util.module_from_spec(spec); spec.loader.exec_module(bsz)
+          a = bsz.canonical_sort(json.load(open("baseline.geojson"))["features"])
+          b = bsz.canonical_sort(json.load(open("out/seattle_rpz_zones.geojson"))["features"])
+          print("order" if json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True) else "data")
+          PY
+          )
+          else
+            KIND=first
+          fi
+          echo "kind=$KIND" >> "$GITHUB_OUTPUT"
+          echo "change kind: $KIND"
+
+      - name: Commit the regenerated data and manifest
+        if: steps.changed.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          cp out/seattle_rpz_zones.geojson seattle_rpz_zones.geojson
+          cp out/manifest.json manifest.json
+          VERSION=$(python3 -c "import json;print(json.load(open('manifest.json'))['data_version'])")
+          COUNT=$(python3 -c "import json;print(json.load(open('manifest.json'))['feature_count'])")
+          ZONES=$(python3 -c "import json;print(json.load(open('manifest.json'))['zone_count'])")
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Data and manifest in ONE commit, always. They must never be
+          # separately visible: a manifest advertising a version the committed
+          # file does not carry would make every app download and then refuse
+          # the file on a hash mismatch.
+          git add seattle_rpz_zones.geojson manifest.json
+          case "${{ steps.changed.outputs.kind }}" in
+            first)
+              SUBJECT="Publish Seattle zone data ${VERSION}"
+              BODY="First build in this repository. ${COUNT} features, ${ZONES} zones. All validation gates passed."
+              ;;
+            order)
+              SUBJECT="Seattle zone data: canonical feature ordering (content unchanged)"
+              BODY="Rebuilt from SDOT. The feature set is identical to the committed file; only row order changed. No zone, side or geometry differs."
+              ;;
+            *)
+              SUBJECT="Seattle zone data rebuilt from SDOT (${VERSION})"
+              BODY="${COUNT} features, ${ZONES} zones. All validation gates passed. See the build-report artifact on this run for the full metrics."
+              ;;
+          esac
+          git commit -m "$SUBJECT" -m "$BODY"
+          git push
+
+      - name: Report a no-op
+        if: steps.changed.outputs.changed == 'false'
+        run: echo "Nothing committed — the regenerated data matches what is already in the repo."

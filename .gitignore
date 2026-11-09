@@ -1,0 +1,9 @@
+# Fetched SDOT payloads and build intermediates. The raw downloads are a
+# cache, re-fetchable at any time, and tens of megabytes; the built GeoJSON
+# in out/ is a staging copy of the one committed at the repo root.
+raw/
+out/
+baseline.geojson
+__pycache__/
+*.pyc
+.DS_Store
