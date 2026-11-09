@@ -123,6 +123,15 @@ MAX_CLIP_ERROR_P95_FEET = 60.0       # our clip vs SDOT's DISTANCE fields
 #      "lon": -122.3151, "lat": 47.6151, "expect_zone": "4"}
 #
 # `expect_zone: None` asserts the point is unrestricted.
+#
+# STILL EMPTY, AND THAT IS THE WEAKEST POINT OF THIS PIPELINE.
+# Every other gate here checks the file against ITSELF — ring order, feature
+# count, bounding box, internal consistency between our compass side and
+# SDOT's. None of them can tell you the data is right about Seattle. Only a
+# point someone has physically stood at can do that, and Chicago's four such
+# points have already caught two bugs that every internal gate waved through.
+# Adding even one Seattle point would change what a green build means here.
+# See the PENDING FIELD CHECKS section of README.md.
 GROUND_TRUTH = []
 
 

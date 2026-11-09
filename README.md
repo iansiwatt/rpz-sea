@@ -50,10 +50,40 @@ data that is already published.
 targets and stays quiet on healthy data. It is synthetic, needs no network,
 and the workflow runs it **before** trusting the validator to gate a build.
 
-**`GROUND_TRUTH` is empty.** Seattle has no field-verified kerbs yet. That is
-the one gate Chicago has and this does not — Chicago refuses a build whose
-four checked street corners come out wrong. The list and instructions for
-adding a point are in `build_seattle_zones.py`.
+## PENDING FIELD CHECKS — none collected yet
+
+**Seattle has no field-verified ground truth. Not one point.** This is the
+single largest difference in trustworthiness between this pipeline and
+Chicago's, and it is recorded here rather than buried in a comment because it
+is easy to forget once everything looks green.
+
+Chicago refuses any build whose four checked street corners come out wrong,
+and that gate has already earned its keep twice: it caught a pipeline change
+that would have shipped buffer zones as restrictions, and it caught a
+43%-of-the-city over-extension bug. `GROUND_TRUTH` in
+`build_seattle_zones.py` is an empty list, so Seattle currently has nothing
+equivalent — every gate it does have checks the file's internal consistency,
+not whether the file is right about the city.
+
+What would fix it: stand at a Seattle kerb with an RPZ sign, note the exact
+position and the zone on the sign, and add it to `GROUND_TRUTH`. Instructions
+are in the script beside the list. Three or four points in different
+neighbourhoods would be enough to make the gate meaningful; one would be
+better than none.
+
+Until then, treat a green build as "the pipeline did what it says" and not as
+"the data is correct".
+
+### Confirmed, not a defect
+
+**53% of street segments are recorded on one flank only** (1,034 of 1,946, in
+the 2026-11-09 build). Chicago's figure is 9.7%, so this looked like a
+possible data gap. It is not: the user confirmed Seattle genuinely restricts
+one side of many blocks, partly because of one-way and steep-hill streets and
+partly because of the amount of commercial frontage. No pipeline change is
+warranted. It does mean the app's strict-containment lookup will often put a
+driving car outside the ribbon, which is what side-of-street reporting exists
+to answer honestly.
 
 ## Automation
 
