@@ -123,16 +123,44 @@ MAX_CLIP_ERROR_P95_FEET = 60.0       # our clip vs SDOT's DISTANCE fields
 #      "lon": -122.3151, "lat": 47.6151, "expect_zone": "4"}
 #
 # `expect_zone: None` asserts the point is unrestricted.
+# `expect_limit_minutes` is optional and only checked when the point expects
+# a zone.
 #
-# STILL EMPTY, AND THAT IS THE WEAKEST POINT OF THIS PIPELINE.
-# Every other gate here checks the file against ITSELF — ring order, feature
-# count, bounding box, internal consistency between our compass side and
-# SDOT's. None of them can tell you the data is right about Seattle. Only a
-# point someone has physically stood at can do that, and Chicago's four such
-# points have already caught two bugs that every internal gate waved through.
-# Adding even one Seattle point would change what a green build means here.
-# See the PENDING FIELD CHECKS section of README.md.
-GROUND_TRUTH = []
+# THIS IS THE ONLY GATE HERE THAT CAN TELL YOU THE DATA IS *RIGHT*.
+# Every other gate checks the file against ITSELF — ring order, feature count,
+# bounding box, the internal agreement between our compass side and SDOT's.
+# All of those can pass on a file that is confidently wrong about Seattle.
+# Chicago's four field points have caught two such bugs that every internal
+# gate waved through.
+#
+# DO NOT EDIT AN EXPECTATION TO MAKE A BUILD PASS. Each of these was checked
+# standing on the street. If one starts failing, either SDOT changed the real
+# world or the pipeline broke; both need a person, and the gate has just done
+# its job. Chicago learned this the hard way: the tell that a change was
+# wrong was not a failing test, it was *having to edit an expectation*.
+GROUND_TRUTH = [
+    # Verified in person 2026-11-09, Central District.
+    #
+    # 21st Ave between E Pine St and E Union St, SDOT ELMNTKEY 70921: signed
+    # Zone 2 on the WEST kerb only, 2-hour limit, nothing on the east kerb.
+    # Both points sit 25 ft from the centerline — the centroid depth of a
+    # 50 ft ribbon, so as far from the kerb edge and the outer edge as a
+    # point can get. Derived by arc-length, never from a vertex index; see
+    # the interior-test-point trap in the exceptions doc.
+    {"label": "21st Ave S of E Pine, west kerb (signed)",
+     "lon": -122.306317300, "lat": 47.614093800,
+     "expect_zone": "2", "expect_limit_minutes": 120},
+
+    # The negative half of the same block, and the more valuable of the two:
+    # it is what would catch a change that invents a flank where none is
+    # signed. An earlier reading of this very block wrongly concluded SDOT
+    # was publishing a spurious east flank; the data was right and the
+    # street-name mapping was wrong. This point pins the answer down so the
+    # question cannot be reopened by guesswork.
+    {"label": "21st Ave S of E Pine, east kerb (unsigned)",
+     "lon": -122.306113500, "lat": 47.614091400,
+     "expect_zone": None},
+]
 
 
 # ---------------------------------------------------------------- fetching
@@ -576,17 +604,30 @@ def validate(features, metrics, baseline_count):
     # ---- ground truth ------------------------------------------------------
     for g in GROUND_TRUTH:
         hit = None
+        hit_limit = None
         for f in features:
             if point_in_ring(to_ft((g["lon"], g["lat"])),
                              [to_ft(c) for c in f["geometry"]["coordinates"][0]]):
                 hit = f["properties"]["zone"]
+                hit_limit = f["properties"].get("time_limit_minutes")
                 break
         if hit != g["expect_zone"]:
             fails.append(
-                f"GROUND TRUTH: {g['label']} resolved to {hit!r}, expected "
-                f"{g['expect_zone']!r}. This point was checked in person. Do "
-                f"not edit the expectation to make the build pass — that is "
-                f"the suite doing its job.")
+                f"GROUND TRUTH: {g['label']} resolved to zone {hit!r}, "
+                f"expected {g['expect_zone']!r}. This point was checked in "
+                f"person. Do not edit the expectation to make the build pass "
+                f"— that is the suite doing its job.")
+        elif g.get("expect_limit_minutes") is not None and hit is not None:
+            # Only meaningful when the zone matched: a limit check on a point
+            # that resolved to the wrong zone would just repeat the failure
+            # above in less useful words.
+            if hit_limit != g["expect_limit_minutes"]:
+                fails.append(
+                    f"GROUND TRUTH: {g['label']} resolved to a "
+                    f"{hit_limit!r}-minute limit, expected "
+                    f"{g['expect_limit_minutes']!r}. The zone is right and "
+                    f"the posted limit is not, which points at the "
+                    f"time_limit_minutes mapping rather than the geometry.")
 
     return fails
 

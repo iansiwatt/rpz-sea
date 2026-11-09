@@ -56,6 +56,14 @@ def metrics_for(features, **over):
     return m
 
 
+# The synthetic fixtures below are invented ribbons in a corner of Seattle;
+# they cannot contain a real field-verified point, so with the module's real
+# GROUND_TRUTH in place every "healthy" case would fail the ground-truth gate.
+# Park the real list and assert it against the REAL data instead, further
+# down — which is a stronger test than the synthetic one it replaces.
+REAL_GROUND_TRUTH = list(bsz.GROUND_TRUTH)
+bsz.GROUND_TRUTH = []
+
 FAILS = 0
 
 
@@ -192,6 +200,31 @@ check("reordered input still carries forward",
 check("fingerprint ignores the envelope",
       [] if bsz.content_fingerprint(bsz.canonical_sort(_f)) == bsz.content_fingerprint(
           bsz.canonical_sort(json.load(open(_stamped))["features"])) else ["wrong"], None)
+
+print("real ground truth against the shipped data")
+_shipped = None
+for _candidate in ("seattle_rpz_zones.geojson",
+                   os.path.join(os.path.dirname(HERE), "seattle_rpz_zones.geojson"),
+                   os.path.join(os.path.dirname(HERE), "Seattle Parking",
+                                "seattle_rpz_zones.geojson")):
+    if os.path.exists(_candidate):
+        _shipped = _candidate
+        break
+
+if not REAL_GROUND_TRUTH:
+    print("  SKIP  GROUND_TRUTH is empty — nothing field-verified to check")
+elif _shipped is None:
+    # Not a pass. A missing data file must not read as "the points are fine".
+    print("  SKIP  no seattle_rpz_zones.geojson found to check against")
+else:
+    _feats = json.load(open(_shipped))["features"]
+    bsz.GROUND_TRUTH = REAL_GROUND_TRUTH
+    _gt = [f for f in bsz.validate(_feats, metrics_for(_feats), 0)
+           if f.startswith("GROUND TRUTH")]
+    bsz.GROUND_TRUTH = []
+    print(f"  ({len(REAL_GROUND_TRUTH)} field point(s) vs {len(_feats)} "
+          f"features in {os.path.basename(_shipped)})")
+    check("every field-verified point still holds", _gt, None)
 
 print("canonical sort")
 import random
