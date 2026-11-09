@@ -1,17 +1,17 @@
 {
-  "bytes": 1642158,
+  "bytes": 1641798,
   "checks": {
     "clip_error_p95_feet": 0.6986505197346347,
-    "one_sided_segments": 1034,
+    "one_sided_segments": 1033,
     "probe_fail": 1,
-    "segments": 1946,
+    "segments": 1945,
     "side_mismatch": 17
   },
   "data_url": "https://raw.githubusercontent.com/iansiwatt/rpz-sea/main/seattle_rpz_zones.geojson",
   "data_version": "2026-11-09",
-  "feature_count": 2858,
+  "feature_count": 2857,
   "filename": "seattle_rpz_zones.geojson",
   "schema_version": 1,
-  "sha256": "8c2ec0ffed9c67f2d1587a69a30364d496b4aa71f9e80ec2b701c16bfbc6f2b3",
+  "sha256": "2cf5b5fe0b0d6b19b421ee559f49547d3a28d05c038e0cd505019504df15829e",
   "zone_count": 37
 }
