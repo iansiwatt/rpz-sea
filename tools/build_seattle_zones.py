@@ -450,25 +450,43 @@ def resolve_data_version(features, baseline_path):
     # still orders these correctly, which is what both the app and the
     # manifest rely on:
     #
-    #     2026-11-09  <  2026-11-09.1  <  2026-11-09.2  <  2026-11-10
+    #     2026-11-09 < 2026-11-09.01 < 2026-11-09.02 < ... < 2026-11-10
     #
-    # including across the day boundary, because "1" > "0" at the character
-    # where the dates first differ.
+    # including across the day boundary, because "0" < "1" at the character
+    # where 2026-11-09.99 and 2026-11-10 first differ.
+    #
+    # THE SUFFIX IS ZERO-PADDED TO TWO DIGITS, and that is not cosmetic. An
+    # unpadded sequence breaks at the tenth same-day rebuild, because
+    # "2026-11-09.10" sorts BELOW "2026-11-09.9" as a plain string — so an
+    # app holding .9 would refuse .10, which is the exact failure this whole
+    # mechanism exists to prevent, reappearing nine steps later. Caught by a
+    # test rather than by reading, after the unpadded version had already
+    # been written.
     previous = str(previous)
     if previous == today or previous.startswith(today + "."):
         suffix = previous[len(today) + 1:]
-        try:
-            n = int(suffix) if suffix else 0
-        except ValueError:
-            # An unrecognised suffix is not something to guess at. Restarting
-            # the sequence could emit a version that sorts BELOW the baseline,
-            # which would strand every installed app.
+        if suffix == "":
+            n = 0
+        elif len(suffix) == 2 and suffix.isdigit():
+            n = int(suffix)
+        else:
+            # Anything else is not something to guess at — including a
+            # single-digit suffix, which would advance to a padded value
+            # that sorts BELOW it (".1" then ".02"). Emitting a version that
+            # sorts below the baseline strands every installed app, which is
+            # a worse outcome than not building at all.
             raise SystemExit(
-                f"baseline data_version {previous!r} is not a date or a "
-                f"date.sequence this script knows how to advance. Fix it by "
-                f"hand rather than letting the build invent a version that "
-                f"might sort below it.")
-        return f"{today}.{n + 1}"
+                f"baseline data_version {previous!r} does not end in a "
+                f"two-digit sequence this script can advance. Fix it by hand "
+                f"rather than letting the build invent a version that might "
+                f"sort below it.")
+        if n >= 99:
+            raise SystemExit(
+                f"baseline data_version {previous!r} has exhausted the "
+                f"two-digit same-day sequence. Ninety-nine rebuilds in one "
+                f"day means something is wrong upstream; widening the field "
+                f"would break ordering against everything already published.")
+        return f"{today}.{n + 1:02d}"
     return today
 
 
